@@ -1,9 +1,8 @@
-
-CONTAINER_NAME := 
-
 build:
-sudo docker build -t ros-gobilda .
-docker run -it --name ros-gobilda \
-	--net=host \
-	-v ~/diff-drive-bot/:/diff-drive-bot/:Z \
-	ros-gobilda
+	sudo docker build -t ros-gobilda .
+
+run: 
+	docker run -it --rm --name ros-gobilda \
+		--net=host \
+		-v ~/Workspaces:/Workspaces/:Z \
+		ros-gobilda
