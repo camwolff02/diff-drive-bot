@@ -175,6 +175,8 @@ cython_debug/
 devel/
 logs/
 build/
+install/
+log/
 bin/
 lib/
 msg_gen/
