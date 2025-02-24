@@ -4,5 +4,5 @@ build:
 run: 
 	docker run -it --rm --name ros-gobilda \
 		--net=host \
-		-v ~/Workspaces/diff-drive-bot/ros2_ws:/ros2_ws/:Z \
+		-v /home/calpoly/Workspaces/diff-drive-bot/ros2_ws:/ros2_ws/:Z \
 		ros-gobilda
