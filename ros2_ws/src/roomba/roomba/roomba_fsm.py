@@ -3,54 +3,72 @@ from rclpy.node import Node
 import math
 import numpy as np
 import numpy.typing as npt
+import transforms3d.quaternions as q 
 from scipy import ndimage
 
+from std_msgs.msg import String, Int32
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import TwistStamped
+from nav_msgs.msg import Odometry
 
 from enum import Enum
 
 class MinimalPublisher(Node):
     class State(Enum):
-        SPIN=0
-        TURN=1
-        FORWARD=2
-        BACKUP=3
+        SEARCH=0
+        FORWARD=1
+        BACKUP=2
+        TURN=3
         RECOVERY=4
 
     def __init__(self):
         super().__init__('minimal_publisher')
-        self.publisher_ = self.create_publisher(TwistStamped, 'cmd_vel', 10)
+        self.twist_publisher_ = self.create_publisher(TwistStamped, 'cmd_vel', 10)
+        self.state_publisher_ = self.create_publisher(Int32, 'state', 10)
         timer_period = 0.1  # seconds
         self.timer = self.create_timer(timer_period, self.timer_callback)
-        self.subscription = self.create_subscription(
+        self.create_subscription(
                 LaserScan,
                 "scan",
                 self.lidar_listener_callback,
                 5
         )
+        self.create_subscription(
+                Odometry,
+                "odom",
+                self.odom_listener_callback,
+                5
+        )
 
         self.processed_scan = None
         self.start_index, self.end_index = None, None
+        self.timestamp = None
+        self.orientation = None
 
-        self.declare_parameter('fov', math.pi /2)  # [rad]
+        self.declare_parameter('fov', math.pi / 2)  # [rad]
         self.declare_parameter("forward_speed", 1.0)  # [m/s]
         self.declare_parameter("turn_speed", 1.57)  # [rad/s]
+        self.declare_parameter("turn_radians", 3 * math.pi / 4)  # [rad]
+        self.declare_parameter("turn_threshold", math.pi / 16)  # [rad]
         self.declare_parameter("stop_dist", 0.5)  # [m]
-        self.declare_parameter("obstacle_size", 5)  # idx TODO figure out math to change to [m]
+        self.declare_parameter("obstacle_width", 0.05)  # [m]
+        self.declare_parameter("backup_time", 1.0)  # [s]
+        self.declare_parameter("scan_filter_width", 2 * math.pi/180)  # [rad]
+        self.declare_parameter("timeout", 3.0)  # [s]
 
         # declare obstacle detection window
-        self._window = np.ones(self.get_parameter("obstacle_size").get_parameter_value().integer_value)
-
-        self.move_foward = TwistStamped()
-        self.move_foward.twist.linear.x = self.get_parameter("forward_speed").get_parameter_value().double_value
-        self.turn = TwistStamped()
-        self.turn.twist.angular.z = self.get_parameter("turn_speed").get_parameter_value().double_value
-        self.state = self.State.SPIN
+        self._w = self.get_parameter("obstacle_width").get_parameter_value().double_value
+        self._d = self.get_parameter("stop_dist").get_parameter_value().double_value
+        self._inc = 0.0
+        self._watchdog = self.get_clock().now()
+        self.state = self.State.FORWARD
 
     def has_obstacle(self, scan: npt.NDArray[np.float_]) -> bool:
-        stop_dist = self.get_parameter("stop_dist").get_parameter_value().double_value
-        return bool(np.any(np.convolve((scan < stop_dist).astype(float), self._window) >= self._window.shape[0]))
+        self._w = self.get_parameter("obstacle_width").get_parameter_value().double_value
+        self._d = self.get_parameter("stop_dist").get_parameter_value().double_value
+
+        window = np.ones(int(self._w / (self._d * self._inc)))
+        return bool(np.any(np.convolve((scan < self._d).astype(float), window) >= window.shape[0]))
     
     def timer_callback(self):
         #make sure the indexes and we have a valid array
@@ -58,54 +76,96 @@ class MinimalPublisher(Node):
             return
 
         msg = TwistStamped()
+        msg.twist.linear.x = 0.0
+        msg.twist.angular.z = 0.0
+        forward_speed = self.get_parameter("forward_speed").get_parameter_value().double_value
+        turn_speed = self.get_parameter("turn_speed").get_parameter_value().double_value
 
         match self.state:
-            case self.State.SPIN:
-                #go to recovery state when an invalid lidar ranges array occurs
-
-                #spin unitl we have detected free space
-                #once we detect space go to TURN state
-                self.state = self.State.FORWARD
-                ...
-            case self.State.TURN:
-                # turn until facing free space
-                #then move to forward state
-                ...
+            case self.State.SEARCH:
+                if not self.watchdog_safe():
+                    # go to recovery state when an invalid lidar ranges array occurs
+                    self.state = self.State.RECOVERY
+                elif not self.has_obstacle(self.processed_scan):
+                    # we found an angle
+                    self.state = self.State.FORWARD
+                else:
+                    msg.twist.angular.z = turn_speed
+               
             case self.State.FORWARD:
-                #go to recovery state when an invalid lidar ranges array occurs
-
-                # move forward until obstacle detected
-                #check the lidar data for dist
-                if self.has_obstacle(self.processed_scan):
+                if not self.watchdog_safe():
+                    # go to recovery state when an invalid lidar ranges array occurs
+                    self.state = self.State.RECOVERY
+                elif self.has_obstacle(self.processed_scan):
+                    # move forward until obstacle detected
                     self.state = self.State.BACKUP
                 else:
-                    msg = self.move_foward
+                    msg.twist.linear.x = forward_speed
 
             case self.State.BACKUP:
+                if self.timestamp is None:
+                    self.timestamp = self.get_clock().now()
+                
                 # backup for one second
-                ...
+                diff = self.get_clock().now() - self.timestamp
+                backup_ns = 1e9*self.get_parameter("backup_time").get_parameter_value().double_value
+                if diff.nanoseconds > backup_ns:
+                    self.timestamp = None
+                    self.state = self.State.TURN
+                else:
+                    msg.twist.linear.x = -forward_speed * 3.0
+
+            case self.State.TURN:
+                # TODO turn to 45 degrees, then transition to SEARCH
+                if self.orientation is None:
+                    # wait to turn until we know our orientation
+                    pass
+                elif self._goal is None:
+                    theta = self.get_parameter("turn_radians").get_parameter_value().double_value
+                    self._goal = q.axangle2quat(self.orientation, theta)
+                else:
+                    _, error = q.quat2axangle(q.qmult(self._goal, q.qconjugate(self.orientation)))
+                    threshold = self.get_parameter("turn_threshold").get_parameter_value().double_value
+                    if error <= threshold:  # still stop if we overshoot
+                        msg.twist.angular.z = turn_speed
+                    else:
+                        self.state = self.State.FORWARD
+
             case self.State.RECOVERY:
                 # stay imobile until lidar online again
-                ...
-                
-        self.publisher_.publish(msg)
-        self.get_logger().info(f'Commanding [Linear: {msg.twist.linear.x}, Angular: {msg.twist.angular.z}]')
+                if self.watchdog_safe():
+                    self.state = self.State.SEARCH
 
-    def lidar_listener_callback(self, msg : LaserScan):        
-        self.get_logger().info(f"angle max: {msg.angle_max}; angle min: {msg.angle_min}; angle deg: {msg.angle_increment}" +
-                               f"; ranges len {len(msg.ranges)}\n ranges:{msg.ranges}")
- 
-        # crop scan to desired fov 
+        state_msg = Int32()
+        state_msg.data = self.state.value
+        self.state_publisher_.publish(state_msg)
+        self.twist_publisher_.publish(msg)
+        self.get_logger().info(f'commanding: [L: {msg.twist.linear.x}, A: {msg.twist.angular.z}]')
+
+    def watchdog_safe(self) -> bool:
+        # TODO add watchod for odometry
+        timeout = 1e9*self.get_parameter("timeout").get_parameter_value().double_value
+        return (self.get_clock().now() - self._watchdog).nanoseconds < timeout
+
+    def lidar_listener_callback(self, msg: LaserScan):        
         if(self.start_index is None or self.end_index is None):
+            self._inc = msg.angle_increment
             fov = self.get_parameter("fov").get_parameter_value().double_value
-            len_ranges = len(msg.ranges)
-            self.start_index = int((len_ranges - (fov / msg.angle_increment)) // 2)
-            self.end_index = int(len_ranges - self.start_index)
+            self.start_index = int((len(msg.ranges) - (fov / msg.angle_increment)) // 2)
+            self.end_index = int(len(msg.ranges) - self.start_index)
 
+        # crop scan to desired fov 
         self.processed_scan = np.asarray(msg.ranges[self.start_index:self.end_index+1])
 
-        ndimage.median_filter(self.processed_scan, 5)  # reduce noise
+        theta = self.get_parameter("scan_filter_width").get_parameter_value().double_value
+        ndimage.median_filter(self.processed_scan, int(theta / self._inc))  # reduce noise
 
+        # pet the watchdog, we got a lidar message
+        self._watchdog = self.get_clock().now()
+
+    def odom_listener_callback(self, msg: Odometry):
+        o = msg.pose.pose.orientation
+        self.orientation = np.array([o.w, o.x, o.y, o.z])
 
 def main(args=None):
     rclpy.init(args=args)

@@ -1,3 +1,7 @@
 /minimal_publisher:
   ros__parameters:
     forward_speed: 0.2
+    turn_speed: 0.2
+    backup_time: 1.0
+    stop_dist: 0.3048
+    obstacle_with: 0.0635

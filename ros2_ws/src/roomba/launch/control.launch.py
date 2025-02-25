@@ -2,14 +2,14 @@ from launch_ros.substitutions import FindPackageShare
 
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 from launch.substitutions import PathJoinSubstitution
 
 
 def generate_launch_description():
     return LaunchDescription([
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource([
+            XMLLaunchDescriptionSource([
                 PathJoinSubstitution([
                     FindPackageShare('foxglove_bridge'),
                     'launch',
@@ -17,7 +17,7 @@ def generate_launch_description():
                 ])
             ]),
             launch_arguments={
-                'port': '8756',
+                'port': '6006',
             }.items(),
         ),
     ])
