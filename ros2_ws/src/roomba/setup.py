@@ -23,7 +23,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            "run_roomba = roomba.roomba_fsm:main"
+            "run_roomba = roomba.roomba_fsm:main",
+            "follow_simon = roomba.follow_path:main"
         ],
     },
 )

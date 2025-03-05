@@ -26,4 +26,13 @@ def generate_launch_description():
                 ])
             ]),
         ),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource([
+                PathJoinSubstitution([
+                    FindPackageShare('depthai_ros_driver'),
+                    'launch',
+                    'camera.launch.py'
+                ])
+            ]),
+        ),
     ])

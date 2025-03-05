@@ -1,9 +1,9 @@
-/minimal_publisher:
+/simon_says:
   ros__parameters:
-    forward_speed: 0.2
-    turn_speed: 0.1
-    backup_time: 1.0
-    stop_dist: 0.3048
-    obstacle_with: 0.0635
-    turn_radians: 0.7
+    forward_speed: 1.0
+    forward_time_short: 4.0
+    forward_time_long: 5.0
+    turn_speed: 0.5
+    turn_time: 2.0
+    mode: 0
 
