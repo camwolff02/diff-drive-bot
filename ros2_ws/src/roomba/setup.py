@@ -24,7 +24,8 @@ setup(
     entry_points={
         'console_scripts': [
             "run_roomba = roomba.roomba_fsm:main",
-            "follow_simon = roomba.follow_path:main"
+            "follow_simon = roomba.follow_path:main",
+            "follow_aruco = roomba.final_project_robot:main"
         ],
     },
 )

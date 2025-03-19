@@ -4,7 +4,7 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import PathJoinSubstitution
-
+from launch_ros.actions import Node
 
 def generate_launch_description():
     return LaunchDescription([
@@ -35,4 +35,13 @@ def generate_launch_description():
                 ])
             ]),
         ),
+        Node(
+            package='ros2_aruco',
+            executable='aruco_node',
+            parameters=[
+                {'image_topic': '/oak/rgb/image_raw'},
+                {'camera_info_topic': '/oak/rgb/camera_info'},
+            ],
+            output='screen'
+        )
     ])
